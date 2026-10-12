@@ -62,6 +62,13 @@ const DEFAULTS = Object.freeze({
    * Off by default: when off the path answers 404.
    */
   prometheusExport: false,
+  /**
+   * Keep 48 h of 1-minute and 30 days of 15-minute history per unit (GPU, memory
+   * headroom, CPU, RAM, network, LLM tok/s and KV) for the unit page. Off by
+   * default: nothing is recorded and config/metrics-history.json is never written.
+   * The 8 h GPU chart history is separate and always on.
+   */
+  metricsHistory: false,
 });
 
 const POLL_INTERVAL_MIN_MS = 500;
@@ -128,6 +135,7 @@ function _clampSettings(settings) {
   s.timeZone = isValidTimeZone(s.timeZone) ? String(s.timeZone).trim() : "";
   s.showVramBreakdown = Boolean(s.showVramBreakdown);
   s.prometheusExport = Boolean(s.prometheusExport);
+  s.metricsHistory = Boolean(s.metricsHistory);
   // Ensure temperatureUnit is valid
   if (s.temperatureUnit !== "celsius" && s.temperatureUnit !== "fahrenheit") {
     s.temperatureUnit = DEFAULTS.temperatureUnit;

@@ -40,6 +40,14 @@ test("prometheusExport is opt-in and stored as a boolean", () => {
   assert.equal(updateSettings({ prometheusExport: 0 }).prometheusExport, false);
 });
 
+test("metricsHistory is opt-in and stored as a boolean", () => {
+  fs.writeFileSync(process.env.SETTINGS_JSON_PATH, JSON.stringify({ density: "compact" }));
+  assert.equal(loadSettings().metricsHistory, false);
+  assert.equal(updateSettings({ metricsHistory: 1 }).metricsHistory, true);
+  assert.equal(loadSettings().metricsHistory, true);
+  assert.equal(updateSettings({ metricsHistory: "" }).metricsHistory, false);
+});
+
 test("timeZone follows the browser by default, accepts IANA names and drops anything else", () => {
   fs.writeFileSync(process.env.SETTINGS_JSON_PATH, JSON.stringify({ density: "compact" }));
   assert.equal(loadSettings().timeZone, "");

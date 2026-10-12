@@ -39,6 +39,8 @@ config/llm-launchers.json
 config/tool-eval-runs.json
 config/tool-eval-results/
 config/gpu-history.json
+config/metrics-history.json
+config/metrics-history.json.corrupt-*
 config/fleet-energy.scope-*.json
 config/*.tmp
 config/*.json.*.tmp

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { GpuHistory, deviceReadings } from "../GpuHistory.js";
+import { UnitHistory as GpuHistory, deviceReadings } from "../UnitHistory.js";
 
 const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "gpuhist-")), "h.json");
 
