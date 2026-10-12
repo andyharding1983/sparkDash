@@ -62,6 +62,11 @@ const DEFAULTS = Object.freeze({
    * Off by default: when off the path answers 404.
    */
   prometheusExport: false,
+  /**
+   * Alert notifications (Settings → Alerts). Off by default: while off nothing
+   * is evaluated or sent, and the alert config / test routes refuse.
+   */
+  alertsEnabled: false,
 });
 
 const POLL_INTERVAL_MIN_MS = 500;
@@ -128,6 +133,7 @@ function _clampSettings(settings) {
   s.timeZone = isValidTimeZone(s.timeZone) ? String(s.timeZone).trim() : "";
   s.showVramBreakdown = Boolean(s.showVramBreakdown);
   s.prometheusExport = Boolean(s.prometheusExport);
+  s.alertsEnabled = Boolean(s.alertsEnabled);
   // Ensure temperatureUnit is valid
   if (s.temperatureUnit !== "celsius" && s.temperatureUnit !== "fahrenheit") {
     s.temperatureUnit = DEFAULTS.temperatureUnit;
