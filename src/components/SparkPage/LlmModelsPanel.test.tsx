@@ -135,3 +135,57 @@ describe("starting a model while another one runs", () => {
     expect(runLauncher).toHaveBeenCalledWith("s1", "a", "stop");
   });
 });
+
+describe("a launcher on the speech-to-text port", () => {
+  const asrSpark = (available: boolean) => {
+    const s = makeSpark("s1");
+    s.asrMonitoring = true;
+    s.asrPort = 9000;
+    s.metrics.asr = {
+      available,
+      error: null,
+      port: 9000,
+      engine: "vLLM",
+      models: available ? ["openai/whisper-large-v3"] : [],
+      modelRoot: null,
+      maxModelLen: null,
+      running: 0,
+      waiting: 0,
+      requestsOk: 0,
+      requestsError: 0,
+      audioBytesTotal: 0,
+      requestsPerMin: null,
+      recentLatency: { count: 0, avg: null, p50: null, p95: null, windowSec: 0 },
+      recentAudioBytes: 0,
+      latency: { count: 0, avg: null, p50: null, p95: null },
+      startedAt: null,
+      lastRequestAt: null,
+    };
+    return s;
+  };
+
+  beforeEach(() => {
+    _resetLauncherCache();
+    fetchLaunchers.mockResolvedValue({
+      // A detached `docker run -d` script reads "stopped" while the container serves.
+      launchers: [{ id: "w", name: "Whisper", dir: "/m", startScript: "start.sh", stopScript: "stop.sh", port: 9000, notes: "" }],
+      job: null,
+      statuses: { w: "stopped" },
+    });
+  });
+
+  it("shows Serving with the STT model when the STT probe answers", async () => {
+    const { container } = render(<LlmModelsPanel spark={asrSpark(true)} />);
+    await flush();
+    expect(container.textContent).toContain("Serving :9000");
+    expect(container.textContent).toContain("openai/whisper-large-v3");
+    expect(container.textContent).not.toContain("Stopped");
+  });
+
+  it("falls back to the script state when the STT server is down", async () => {
+    const { container } = render(<LlmModelsPanel spark={asrSpark(false)} />);
+    await flush();
+    expect(container.textContent).toContain("Stopped");
+    expect(container.textContent).not.toContain("Serving");
+  });
+});

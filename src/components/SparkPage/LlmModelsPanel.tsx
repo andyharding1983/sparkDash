@@ -277,7 +277,11 @@ function LlmModelsPanelFor({ spark, className }: { spark: SparkSnapshot; classNa
     const state = statuses[l.id] ?? "unknown";
     const portIdx = l.port != null ? (spark.llmPorts ?? []).indexOf(l.port) : -1;
     const live = portIdx >= 0 ? spark.metrics.llm?.[portIdx] : null;
-    const serving = Boolean(live?.available);
+    // A launcher on the speech-to-text port is serving when the STT probe answers.
+    const asr = spark.metrics.asr;
+    const asrLive = l.port != null && spark.asrMonitoring && asr?.port === l.port && asr.available ? asr : null;
+    const serving = Boolean(live?.available) || asrLive != null;
+    const servedModel = live?.available ? live.modelId : asrLive?.models[0] ?? null;
     const mine = job?.launcherId === l.id;
     const pending = confirm?.id === l.id ? confirm : null;
     const other = pending?.kind === "switch" ? byId.get(pending.otherId) : null;
@@ -289,7 +293,7 @@ function LlmModelsPanelFor({ spark, className }: { spark: SparkSnapshot; classNa
             {mine && job?.status === "running" && job.action === "stop" ? (
               <Tag tone="info">Stopping…</Tag>
             ) : serving ? (
-              <Tag tone="good" title={live?.modelId ?? undefined}>
+              <Tag tone="good" title={servedModel ?? undefined}>
                 Serving :{l.port}
               </Tag>
             ) : state === "running" ? (
@@ -304,7 +308,7 @@ function LlmModelsPanelFor({ spark, className }: { spark: SparkSnapshot; classNa
             {l.dir}
           </div>
           {l.notes ? <div className="sp-launch__notes">{l.notes}</div> : null}
-          {serving && live?.modelId ? <div className="sp-launch__notes mono">{live.modelId}</div> : null}
+          {serving && servedModel ? <div className="sp-launch__notes mono">{servedModel}</div> : null}
         </div>
         <div className="sp-launch__actions">
           {pending?.kind === "stop" ? (
