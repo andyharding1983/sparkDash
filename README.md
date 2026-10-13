@@ -37,6 +37,7 @@ Monitored units run **Linux**, **macOS**, or **Windows** (a Windows PC with an N
 - [Features](#features)
 - [LLM server presets & backend auto-detection](#llm-server-presets--backend-auto-detection)
 - [ComfyUI monitoring](#comfyui-monitoring)
+- [Speech-to-text monitoring](#speech-to-text-monitoring)
 - [Hermes Agent monitoring](#hermes-agent-monitoring)
 - [Tailnet monitoring](#tailnet-monitoring)
 - [Tailscale Serve (HTTPS)](#tailscale-serve-https)
@@ -113,6 +114,7 @@ Full history: [CHANGELOG.md](./CHANGELOG.md)
 | **LLM probe** | Auto-detects llama.cpp, vLLM, sglang, LM Studio, Ollama, ds4-server, EXL3, TensorFold, FreeToken, or q27; live decode/prefill tok/s from the engine's own counters where it publishes them (not LM Studio or Ollama); cached vs uncached prefill on ds4, llama.cpp, SGLang, and q27; **daily peak** history on the LLM card |
 | **LLM server presets** | One-click **LM Studio :1234** / **Ollama :11434** / **TensorFold :8888** presets in the Add wizard's LLM-ports step, the "+ Add LLM port" panel, and each LLM panel's settings (they fill the port number — they install nothing) |
 | **ComfyUI** | Opt-in probe: queue/jobs, progress, cancel, Open link, inventory, overview chip |
+| **Speech-to-text** | Opt-in probe for a Whisper server on vLLM: requests/min, queue, latency p50/p95, transcribed/error counts, audio in, overview chip |
 | **Hermes Agent** | Opt-in per unit: background update check (10 min), status badges, one-click or batch `hermes update` |
 | **Tailnet** | Opt-in probe: flags a unit that is healthy on the LAN but off its tailnet |
 | **Decode benchmark** | Multi-concurrency streaming decode tok/s; type picker (Structured / Prose / Code / JSON). Code is a different Python task per stream. Lab protocol (temp 0, thinking off); persisted last run. Remote units: LAN HTTP, or SSH tunnel to loopback. **Remote** button for an on-demand HTTPS/host:port target |
@@ -121,7 +123,7 @@ Full history: [CHANGELOG.md](./CHANGELOG.md)
 | **Prompt Showcase** | Full-page multi-terminal LLM streaming demo (up to 32 prompts) with live tok/s and copy-out |
 | **LLM inference health** | KV cache free/pool (vLLM `cache_config_info` token and byte size; usage % when the pool size is absent), run/wait queue, TTFT/E2E/ITL p95, preemptions, prefix cache, MTP accept from Prometheus `/metrics` (vLLM and q27; q27 FIFO-queues so the Requests tile reads “N run” without a wait gauge) |
 | **Multiple LLM ports** | Monitor several LLM servers on different ports simultaneously — each gets its own panel with independent backend detection and metrics |
-| **GPU processes** | See the top GPU processes by VRAM usage directly in the GPU panel, including process name and memory allocation |
+| **GPU processes** | See the top GPU processes by VRAM usage directly in the GPU panel, including process name and memory allocation. On the local unit each process is tagged with the probed service it serves (`LLM :8888`, `STT :9000`, `Comfy :8188`) |
 | **Multi-GPU hosts** | A dedicated GPU host with several NVIDIA cards reports each one: the header names every card, the GPU panel adds a block per card (throttle chip, usage and temperature sparklines, power, VRAM bar) and the API exposes `gpu.gpus[]`. The headline `gpu` numbers stay an aggregate of all cards, so Overview cards and alerts need no change |
 | **Spark uptime** | System uptime displayed inline on each Spark header for at-a-glance availability |
 | **Power controls** | Graceful shutdown (SSH host script). Wake-on-LAN is for dedicated GPU hosts whose NIC supports it. DGX Spark does not wake from a magic packet |
@@ -197,6 +199,51 @@ The Spark page **Services** section shows the ComfyUI card. On Overview, a small
 | POST | `/api/sparks/:id/comfy/cancel` | Cancel a job (`{ "promptId": "<uuid>" }`) — interrupt running and/or remove from queue |
 
 Env (optional): `COMFY_PORT` (default `8188`), `COMFY_PROBE_TIMEOUT_MS`, `POLL_INTERVAL_COMFY`.
+
+---
+
+## Speech-to-text monitoring
+
+sparkDash can **optionally** monitor a speech-to-text server on each Spark — tested with Whisper large-v3 (including a fine-tune served from a merged LoRA) on **vLLM** (`vllm serve … --port 9000`, OpenAI `/v1/audio/transcriptions`). Many units run an STT model next to their LLM; without this it showed up only as an unnamed process in **Other** GPU memory.
+
+### What is supported
+
+| Capability | Details |
+|------------|---------|
+| **Opt-in per Spark** | `asrMonitoring` (default **off**) + `asrPort` (default **9000**) |
+| **Any role** | Head, worker, and standalone can enable it independently of LLM cluster role |
+| **Model** | Served model ids from `GET /v1/models`, plus the weights directory (`root`) — useful when a LoRA is merged and served under an alias |
+| **Throughput** | Requests/min over the last minute (sparkline), last request time, transcribed and error counts since the server started (`http_requests_total` on `/v1/audio/*`) |
+| **Queue** | `vllm:num_requests_running` / `vllm:num_requests_waiting`; amber while anything waits |
+| **Latency** | End-to-end p50 / p95 / average over the last 5 minutes from `vllm:e2e_request_latency_seconds` bucket deltas, falling back to since-start figures when idle |
+| **Audio in** | Uploaded request bytes since start and over the last 5 minutes (`http_request_size_bytes_sum`) |
+| **GPU memory** | On the local unit the Whisper engine process gets its own **STT** segment in the VRAM bar and a tag in the GPU process list (see [GPU process attribution](#gpu-process-attribution)) |
+| **Overview chip** | `STT · idle` / `STT · 4.2/m` / `STT · 2q` / `STT · down` |
+| **Layout** | Under **Services**: beside the primary LLM when ComfyUI is off, otherwise full width |
+
+**Not claimed:** audio *duration* and real-time factor — vLLM does not export audio seconds, and request bytes depend on the codec. Rates and recent latency are computed in memory from successive polls, so they read `—` for the first minute after sparkDash or the STT server restarts. Other STT servers that expose `/v1/models` and a Prometheus `/metrics` with the same names should work but are untested. The Edit dialog's **Connectivity Test** does not check the STT port yet.
+
+### How to enable (per Spark)
+
+1. Open the Spark tab → **Edit** (pencil).
+2. Enable **Speech-to-text monitoring**.
+3. Set **port** if needed (default **9000**).
+4. **Save**.
+
+### Config fields (persisted on the Spark)
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `asrMonitoring` | `false` | Probe the STT server and show the card / overview chip |
+| `asrPort` | `9000` | STT server HTTP port |
+
+The probe result is `metrics.asr` in snapshots (`GET /api/sparks/:id/metrics` and the WebSocket); `null` when monitoring is off.
+
+Env (optional): `ASR_PORT` (default `9000`), `POLL_INTERVAL_ASR` (unset: follows **Settings → Refresh rate**, like ComfyUI). The probe uses `LLM_PROBE_TIMEOUT_MS`.
+
+### GPU process attribution
+
+`nvidia-smi` names a process (`VLLM::EngineCore`, `python3`) but not the server it belongs to. For the **local** unit, sparkDash finds the sockets listening on each probed port (LLM ports, `asrPort`, `comfyPort`) in `/proc/net/tcp{,6}` and walks each GPU process up its parents until one holds such a socket — engine workers such as `sglang::scheduler` or vLLM's `EngineCore` are children of the HTTP server. Matches add `service` (`llm` / `asr` / `comfy`) and `port` to `metrics.gpu.processes[]`; the VRAM bar then sums all LLM processes into the engine (so an SGLang launcher's own allocation is no longer **Other**), draws STT and ComfyUI as their own segments, and leaves only the rest as **Other**. It needs the container's `pid: host` and `network_mode: host` (the default Compose file). Remote units and unmatched processes keep the previous largest-process rule.
 
 ---
 
@@ -739,14 +786,14 @@ Gear icon in the header, or `GET`/`PUT` `/api/settings`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Refresh rate (`pollIntervalMs`) | 2000 ms | How often every unit is polled for GPU, CPU/RAM, network, memory bandwidth, LLM and ComfyUI metrics, and how often the dashboard is pushed an update (the dialog offers 1 s to 10 s; the server accepts 0.5 s to 60 s). Remote units are polled over SSH, so 1 s costs the most. Memory bandwidth (`nvidia-smi dmon`, which blocks ~1 s) never goes below 2 s. Storage, liveness, Tailnet, Hermes and the `NV_ERR` scan keep their own cadences. A `POLL_INTERVAL_*` env var, when set, pins its domain instead |
+| Refresh rate (`pollIntervalMs`) | 2000 ms | How often every unit is polled for GPU, CPU/RAM, network, memory bandwidth, LLM, ComfyUI and speech-to-text metrics, and how often the dashboard is pushed an update (the dialog offers 1 s to 10 s; the server accepts 0.5 s to 60 s). Remote units are polled over SSH, so 1 s costs the most. Memory bandwidth (`nvidia-smi dmon`, which blocks ~1 s) never goes below 2 s. Storage, liveness, Tailnet, Hermes and the `NV_ERR` scan keep their own cadences. A `POLL_INTERVAL_*` env var, when set, pins its domain instead |
 | Default LLM port | 8888 | Default for new Sparks |
 | Hide offline Sparks | false | Hide offline Sparks on Overview |
 | Hide worker nodes | false | Hide Worker-role Sparks from Overview and the tab bar |
 | Temperature unit | Celsius | Display GPU temperature in °C or °F |
 | Time zone | Browser | Hour and day boundaries and labels on the Tokens, Energy and Activity charts (IANA name such as `Europe/Paris`; empty follows each browser). Daily token buckets and monthly energy stay UTC |
 | Benchmark share image | true | Decode/prefill **Copy results** becomes a split button: the label copies the text summary, the caret offers **Copy as text** / **Copy as image** on hover or click. Turn it off to keep the plain button. The image copies where the page has an image clipboard (HTTPS or localhost); over plain http on a LAN IP the card downloads instead |
-| Detailed VRAM breakdown | true | The VRAM bar on the Overview cards and the GPU panel is split by what holds the memory — LLM engine (largest GPU process while an endpoint is serving), system/CPU (GB10 unified pool), other GPU use — over a free track, and turns amber/red on low free memory (GB10: under 8 / 4 GB; discrete GPU: under 2 / 1 GB) rather than on a high percentage. Hover or focus for the breakdown, including the engine's KV fill where the backend reports it. Turn it off for the single percentage bar |
+| Detailed VRAM breakdown | true | The VRAM bar on the Overview cards and the GPU panel is split by what holds the memory — LLM engine (largest GPU process while an endpoint is serving; on the local unit, every process attributed to an LLM port), speech-to-text and ComfyUI (local unit, when monitored), system/CPU (GB10 unified pool), other GPU use — over a free track, and turns amber/red on low free memory (GB10: under 8 / 4 GB; discrete GPU: under 2 / 1 GB) rather than on a high percentage. Hover or focus for the breakdown, including the engine's KV fill where the backend reports it. Turn it off for the single percentage bar |
 | Show Fleet Energy | true | Overview card with rolling fleet power estimates (the Fleet energy page is always in the sidebar) |
 | Electricity price / currency | not set / `$` | Per kWh, for the estimated cost on the Fleet energy page; empty hides cost |
 | Show LLM Token Totals | true | Overview card with cumulative tokens per model |
@@ -770,8 +817,10 @@ Copy `.env.example` to `.env` if needed:
 | `PORT` | `5555` | HTTP + WebSocket listen port |
 | `LLM_PORT` | `8888` | Default LLM probe port |
 | `COMFY_PORT` | `8188` | Default ComfyUI probe port |
+| `ASR_PORT` | `9000` | Default speech-to-text probe port |
 | `POLL_INTERVAL_GPU` | _(setting)_ | GPU poll (ms). Unset: follows **Settings → Refresh rate**; set: pins GPU polling regardless of the setting |
 | `POLL_INTERVAL_COMFY` | _(setting)_ | ComfyUI probe poll (ms); same rule |
+| `POLL_INTERVAL_ASR` | _(setting)_ | Speech-to-text probe poll (ms); same rule |
 | `POLL_INTERVAL_CPU` | _(setting)_ | CPU / RAM poll (ms); same rule |
 | `POLL_INTERVAL_NETWORK` | _(setting)_ | Network poll (ms); same rule |
 | `POLL_INTERVAL_STORAGE` | `5000` | Storage poll (ms): disk usage and the read/write speed on the Storage panel |
