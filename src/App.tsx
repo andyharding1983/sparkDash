@@ -91,6 +91,8 @@ function placeholderSnapshot(
     llmMonitoring?: boolean;
     comfyMonitoring?: boolean;
     comfyPort?: number;
+    asrMonitoring?: boolean;
+    asrPort?: number;
     tailscaleMonitoring?: boolean;
     kind?: "spark" | "host";
   }
@@ -126,6 +128,8 @@ function placeholderSnapshot(
           : roleFields?.llmMonitoring !== false,
     comfyMonitoring: Boolean(roleFields?.comfyMonitoring),
     comfyPort: roleFields?.comfyPort ?? 8188,
+    asrMonitoring: Boolean(roleFields?.asrMonitoring),
+    asrPort: roleFields?.asrPort ?? 9000,
     tailscaleMonitoring: Boolean(roleFields?.tailscaleMonitoring),
     hermes: {
       monitoring: false,
@@ -157,6 +161,7 @@ function placeholderSnapshot(
       unifiedMemory: null,
       llm: [],
       comfy: null,
+      asr: null,
       tailscale: null,
     },
   };
@@ -340,6 +345,8 @@ function DashboardApp() {
               llmMonitoring: c.llmMonitoring ?? existing.llmMonitoring,
               comfyMonitoring: c.comfyMonitoring ?? existing.comfyMonitoring,
               comfyPort: c.comfyPort ?? existing.comfyPort,
+              asrMonitoring: c.asrMonitoring ?? existing.asrMonitoring,
+              asrPort: c.asrPort ?? existing.asrPort,
               tailscaleMonitoring: c.tailscaleMonitoring ?? existing.tailscaleMonitoring,
               disabledDevices: c.disabledDevices || existing.disabledDevices,
               disabledInterfaces: c.disabledInterfaces || existing.disabledInterfaces,
@@ -362,6 +369,8 @@ function DashboardApp() {
               llmMonitoring: c.llmMonitoring,
               comfyMonitoring: c.comfyMonitoring,
               comfyPort: c.comfyPort,
+              asrMonitoring: c.asrMonitoring,
+              asrPort: c.asrPort,
               tailscaleMonitoring: c.tailscaleMonitoring,
               kind: c.kind,
             }

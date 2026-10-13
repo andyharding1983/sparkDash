@@ -252,6 +252,11 @@ export function EditSparkDialog({
           const n = Number(config.comfyPort);
           return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : 8188;
         })(),
+        asrMonitoring: Boolean(config.asrMonitoring),
+        asrPort: (() => {
+          const n = Number(config.asrPort);
+          return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : 9000;
+        })(),
         hermesMonitoring: Boolean(config.hermesMonitoring),
         tailscaleMonitoring: Boolean(config.tailscaleMonitoring),
         ssh: {
@@ -497,6 +502,61 @@ export function EditSparkDialog({
                       const n = Number(config.comfyPort);
                       if (!Number.isInteger(n) || n < 1 || n > 65535) {
                         update({ comfyPort: 8188 });
+                      }
+                    }}
+                    className="w-14 border-0 bg-transparent px-0.5 py-0.5 text-center font-tabular text-xs text-inherit outline-none focus:rounded focus:bg-surface-elevated focus:ring-1 focus:ring-accent disabled:cursor-not-allowed"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                <label className="flex min-w-0 items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(config.asrMonitoring)}
+                    onChange={(e) =>
+                      update({
+                        asrMonitoring: e.target.checked,
+                        asrPort: config.asrPort ?? 9000,
+                      })
+                    }
+                  />
+                  <span>Speech-to-text monitoring</span>
+                  <span
+                    className="inline-flex shrink-0 cursor-help text-muted hover:text-text"
+                    title="When enabled, probe a Whisper server (vLLM /v1/audio/transcriptions) on this host and show a Speech-to-text card with requests, queue and latency. Default port is 9000."
+                    aria-label="Enable probing a speech-to-text server and showing the Speech-to-text card."
+                  >
+                    <InfoIcon className="h-3.5 w-3.5" />
+                  </span>
+                </label>
+                <div
+                  className={`ml-auto flex items-center gap-1 font-tabular ${
+                    config.asrMonitoring ? "text-text" : "pointer-events-none opacity-40"
+                  }`}
+                  title="Speech-to-text HTTP port (default 9000)"
+                >
+                  <span className="select-none text-muted" aria-hidden>
+                    port
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    inputMode="numeric"
+                    disabled={!config.asrMonitoring}
+                    aria-label="Speech-to-text port"
+                    value={config.asrPort ?? 9000}
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value, 10);
+                      if (Number.isInteger(n) && n >= 1 && n <= 65535) {
+                        update({ asrPort: n });
+                      }
+                    }}
+                    onBlur={() => {
+                      const n = Number(config.asrPort);
+                      if (!Number.isInteger(n) || n < 1 || n > 65535) {
+                        update({ asrPort: 9000 });
                       }
                     }}
                     className="w-14 border-0 bg-transparent px-0.5 py-0.5 text-center font-tabular text-xs text-inherit outline-none focus:rounded focus:bg-surface-elevated focus:ring-1 focus:ring-accent disabled:cursor-not-allowed"

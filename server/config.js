@@ -39,7 +39,7 @@ const SSH_CONNECT_TIMEOUT = 5; // seconds
 const SSH_MULTIPLEX = process.env.SSH_MULTIPLEX !== "0";
 
 // ─── Poll intervals (milliseconds) ───────────────────────
-// The fast domains (GPU, CPU/RAM, network, LLM, ComfyUI, bandwidth) follow
+// The fast domains (GPU, CPU/RAM, network, LLM, ComfyUI, STT, bandwidth) follow
 // Settings → Poll interval (see resolveFastPollIntervals below); the constants
 // here are their values when no setting is passed. Setting one of their env
 // vars pins that domain regardless of the setting.
@@ -49,6 +49,7 @@ const POLL_INTERVAL_NETWORK = parseInt(process.env.POLL_INTERVAL_NETWORK || "200
 const POLL_INTERVAL_STORAGE = parseInt(process.env.POLL_INTERVAL_STORAGE || "5000", 10);
 const POLL_INTERVAL_LLM = parseInt(process.env.POLL_INTERVAL_LLM || "2000", 10);
 const POLL_INTERVAL_COMFY = parseInt(process.env.POLL_INTERVAL_COMFY || "2000", 10);
+const POLL_INTERVAL_ASR = parseInt(process.env.POLL_INTERVAL_ASR || "2000", 10);
 // Tailnet membership changes slowly; each poll is an SSH round-trip.
 const POLL_INTERVAL_TAILSCALE = parseInt(process.env.POLL_INTERVAL_TAILSCALE || "30000", 10);
 // Kernel journal scan for NV_ERR_NO_MEMORY — not on the 2s GPU loop.
@@ -88,6 +89,7 @@ const FAST_POLL_ENV_VARS = Object.freeze({
   memory: "POLL_INTERVAL_BANDWIDTH",
   llm: "POLL_INTERVAL_LLM",
   comfy: "POLL_INTERVAL_COMFY",
+  asr: "POLL_INTERVAL_ASR",
 });
 
 /** Positive integer ms from an env value, or null when unset/blank/invalid. */
@@ -120,7 +122,7 @@ const FAST_POLL_ENV_OVERRIDES = Object.freeze(
  *
  * @param {number} [pollIntervalMs] Settings → Poll interval
  * @param {Record<string, number | null>} [overrides] domain → pinned ms (env)
- * @returns {{ gpu: number, cpu: number, ram: number, network: number, memory: number, llm: number, comfy: number }}
+ * @returns {{ gpu: number, cpu: number, ram: number, network: number, memory: number, llm: number, comfy: number, asr: number }}
  */
 function resolveFastPollIntervals(pollIntervalMs, overrides = FAST_POLL_ENV_OVERRIDES) {
   const base =
@@ -144,6 +146,8 @@ const PORT = parseInt(process.env.PORT || "5555", 10);
 const LLM_PORT = parseInt(process.env.LLM_PORT || "8888", 10);
 /** Default ComfyUI HTTP port. */
 const COMFY_PORT = parseInt(process.env.COMFY_PORT || "8188", 10);
+/** Default speech-to-text (Whisper on vLLM) HTTP port. */
+const ASR_PORT = parseInt(process.env.ASR_PORT || "9000", 10);
 
 // ─── DGX Spark constants ────────────────────────────────
 const DGX_SPARK = {
@@ -201,6 +205,7 @@ export {
   POLL_INTERVAL_STORAGE,
   POLL_INTERVAL_LLM,
   POLL_INTERVAL_COMFY,
+  POLL_INTERVAL_ASR,
   POLL_INTERVAL_TAILSCALE,
   POLL_INTERVAL_NVERR,
   POLL_INTERVAL_BANDWIDTH,
@@ -214,6 +219,7 @@ export {
   PORT,
   LLM_PORT,
   COMFY_PORT,
+  ASR_PORT,
   DGX_SPARK,
   UNIT_CONVERSION,
   HARDWARE_DEFAULTS,

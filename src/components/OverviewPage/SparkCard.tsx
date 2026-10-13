@@ -115,6 +115,8 @@ function SparkCardImpl({
     spark.metrics.storage.find((d) => d.label === "/") ?? spark.metrics.storage.find((d) => d.device === "nvme0n1p2");
 
   const comfy = spark.comfyMonitoring ? spark.metrics?.comfy : undefined;
+  const asr = spark.asrMonitoring ? spark.metrics?.asr : undefined;
+  const asrRpm = asr?.requestsPerMin ?? 0;
   const hermes = spark.hermes;
 
   const roleText = role === "head" ? "head" : role === "worker" ? "worker" : "standalone";
@@ -203,6 +205,21 @@ function SparkCardImpl({
           <Tag tone="warn" title={`ComfyUI queue: ${comfy.queuePending} pending`}>Comfy {"·"} {comfy.queuePending}q</Tag>
         ) : (
           <Tag title="ComfyUI idle">Comfy {"·"} idle</Tag>
+        )
+      ) : null}
+      {spark.asrMonitoring ? (
+        !asr?.available ? (
+          <Tag tone="bad" title="Speech-to-text monitoring on — not reachable">STT {"·"} down</Tag>
+        ) : (asr.waiting ?? 0) > 0 ? (
+          <Tag tone="warn" title={`Speech-to-text: ${asr.running} running · ${asr.waiting} waiting`}>
+            STT {"·"} {asr.waiting}q
+          </Tag>
+        ) : (asr.running ?? 0) > 0 || asrRpm > 0 ? (
+          <Tag tone="good" title={`Speech-to-text: ${asrRpm.toFixed(1)} requests/min · ${asr.running} running`}>
+            STT {"·"} {asrRpm >= 10 ? asrRpm.toFixed(0) : asrRpm.toFixed(1)}/m
+          </Tag>
+        ) : (
+          <Tag title="Speech-to-text idle">STT {"·"} idle</Tag>
         )
       ) : null}
       {hermes?.monitoring && hermes.status === "running" ? <Tag tone="info">Hermes updating</Tag> : null}

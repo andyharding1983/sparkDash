@@ -6,6 +6,8 @@ import {
 } from "../collectors/SystemCollector.js";
 import { LlmProbe } from "../collectors/LlmProbe.js";
 import { ComfyProbe } from "../collectors/ComfyProbe.js";
+import { AsrProbe } from "../collectors/AsrProbe.js";
+import { tagGpuProcesses } from "../collectors/gpuServices.js";
 import { HermesProbe } from "../collectors/HermesProbe.js";
 import { TailscaleProbe } from "../collectors/TailscaleProbe.js";
 import { llmDaily } from "../collectors/LlmDaily.js";
@@ -18,13 +20,14 @@ import {
   POLL_INTERVAL_TAILSCALE,
   LLM_PORT,
   COMFY_PORT,
+  ASR_PORT,
   HOST_PATHS,
   resolveFastPollIntervals,
 } from "../config.js";
 
 /**
  * Domains on a timer of their own that follow Settings → Poll interval
- * (unless pinned by env — see resolveFastPollIntervals). LLM and ComfyUI follow
+ * (unless pinned by env — see resolveFastPollIntervals). LLM, ComfyUI and STT follow
  * it too but are armed only while their monitoring is on. Storage, liveness,
  * Tailnet, Hermes and the NV_ERR journal scan keep their own cadences.
  */
@@ -149,6 +152,11 @@ export class SparkMonitor {
       ? new ComfyProbe(spark, this._comfyPort(spark))
       : null;
 
+    /** @type {AsrProbe | null} */
+    this.asrProbe = this._asrMonitoringEnabled(spark)
+      ? new AsrProbe(spark, this._asrPort(spark))
+      : null;
+
     /** @type {TailscaleProbe | null} */
     this.tailscaleProbe = this._tailscaleMonitoringEnabled(spark)
       ? new TailscaleProbe(spark)
@@ -201,6 +209,7 @@ export class SparkMonitor {
       llm: [],
       residentModels: [],
       comfy: null,
+      asr: null,
       tailscale: null,
     };
     this._lastUpdate = {};
@@ -239,6 +248,8 @@ export class SparkMonitor {
     /** @type {ReturnType<typeof setInterval> | null} */
     this._comfyIntervalId = null;
     /** @type {ReturnType<typeof setInterval> | null} */
+    this._asrIntervalId = null;
+    /** @type {ReturnType<typeof setInterval> | null} */
     this._hermesIntervalId = null;
     /** @type {ReturnType<typeof setInterval> | null} */
     this._tailscaleIntervalId = null;
@@ -258,6 +269,8 @@ export class SparkMonitor {
     const wasLlm = this._llmMonitoringEnabled(this.spark);
     const wasComfy = this._comfyMonitoringEnabled(this.spark);
     const prevComfyPort = this._comfyPort(this.spark);
+    const wasAsr = this._asrMonitoringEnabled(this.spark);
+    const prevAsrPort = this._asrPort(this.spark);
     const wasHermes = this._hermesMonitoringEnabled(this.spark);
     const wasTailscale = this._tailscaleMonitoringEnabled(this.spark);
     this.collector.invalidatePendingCollections();
@@ -311,6 +324,20 @@ export class SparkMonitor {
       this._metrics.comfy = null;
     }
 
+    // Speech-to-text probe — create / update / clear
+    if (this._asrMonitoringEnabled()) {
+      const port = this._asrPort();
+      if (this.asrProbe) {
+        if (port !== prevAsrPort) this.asrProbe.setTarget(spark, port);
+        else this.asrProbe.spark = spark;
+      } else {
+        this.asrProbe = new AsrProbe(spark, port);
+      }
+    } else {
+      this.asrProbe = null;
+      this._metrics.asr = null;
+    }
+
     // Tailscale probe — create / update / clear
     if (this._tailscaleMonitoringEnabled()) {
       if (this.tailscaleProbe) {
@@ -347,6 +374,11 @@ export class SparkMonitor {
     const comfyPortChanged = comfyOn && prevComfyPort !== this._comfyPort();
     if (this._running && (wasComfy !== comfyOn || comfyPortChanged)) {
       this._restartComfyPollInterval();
+    }
+    const asrOn = this._asrMonitoringEnabled();
+    const asrPortChanged = asrOn && prevAsrPort !== this._asrPort();
+    if (this._running && (wasAsr !== asrOn || asrPortChanged)) {
+      this._restartAsrPollInterval();
     }
     if (this._running && wasTailscale !== this._tailscaleMonitoringEnabled()) {
       this._restartTailscalePollInterval();
@@ -442,6 +474,45 @@ export class SparkMonitor {
     const n = Number(spark?.comfyPort);
     if (Number.isInteger(n) && n >= 1 && n <= 65535) return n;
     return COMFY_PORT;
+  }
+
+  /** Ports of the services probed on this unit, for GPU process attribution. */
+  _gpuServicePorts() {
+    const out = [];
+    if (this._llmMonitoringEnabled()) {
+      for (const port of this._llmPorts()) out.push({ service: "llm", port });
+    }
+    if (this._asrMonitoringEnabled()) out.push({ service: "asr", port: this._asrPort() });
+    if (this._comfyMonitoringEnabled()) out.push({ service: "comfy", port: this._comfyPort() });
+    return out;
+  }
+
+  /**
+   * Opt-in speech-to-text (Whisper on vLLM) monitoring (all roles; default off).
+   * @param {object} [spark]
+   */
+  _asrMonitoringEnabled(spark = this.spark) {
+    return Boolean(spark?.asrMonitoring);
+  }
+
+  /** @param {object} [spark] */
+  _asrPort(spark = this.spark) {
+    const n = Number(spark?.asrPort);
+    if (Number.isInteger(n) && n >= 1 && n <= 65535) return n;
+    return ASR_PORT;
+  }
+
+  /** Start or clear the speech-to-text poll timer based on monitoring flag. */
+  _restartAsrPollInterval() {
+    if (this._asrIntervalId != null) {
+      clearInterval(this._asrIntervalId);
+      this._intervals = this._intervals.filter((id) => id !== this._asrIntervalId);
+      this._asrIntervalId = null;
+    }
+    if (this._asrMonitoringEnabled() && this._running) {
+      this._asrIntervalId = this._armDomainTimer("asr");
+      void this._pollDomain("asr");
+    }
   }
 
   /** Start or clear the ComfyUI poll timer based on monitoring flag. */
@@ -586,6 +657,10 @@ export class SparkMonitor {
       this._clearTimer(this._comfyIntervalId);
       this._comfyIntervalId = this._armDomainTimer("comfy");
     }
+    if (this._asrIntervalId != null && prev.asr !== this._fastIntervals.asr) {
+      this._clearTimer(this._asrIntervalId);
+      this._asrIntervalId = this._armDomainTimer("asr");
+    }
   }
 
   /** Start background polling. */
@@ -602,6 +677,7 @@ export class SparkMonitor {
     this._intervals.push(setInterval(() => this._pollDomain("residentModels"), RESIDENT_MODELS_POLL_MS));
     this._restartLlmPollInterval();
     this._restartComfyPollInterval();
+    this._restartAsrPollInterval();
     this._restartHermesPollInterval();
     this._restartTailscalePollInterval();
     // Liveness on a slightly slower cadence
@@ -621,6 +697,7 @@ export class SparkMonitor {
     this._domainTimers = {};
     this._llmIntervalId = null;
     this._comfyIntervalId = null;
+    this._asrIntervalId = null;
     this._hermesIntervalId = null;
     this._tailscaleIntervalId = null;
     this._inflight = {};
@@ -645,6 +722,7 @@ export class SparkMonitor {
   snapshot() {
     const ports = this._llmMonitoringEnabled() ? this._llmPorts() : [];
     const comfyOn = this._comfyMonitoringEnabled();
+    const asrOn = this._asrMonitoringEnabled();
     const tailscaleOn = this._tailscaleMonitoringEnabled();
     return {
       id: this.spark.id,
@@ -677,6 +755,8 @@ export class SparkMonitor {
             .filter((n) => Number.isInteger(n)),
       comfyMonitoring: comfyOn,
       comfyPort: this._comfyPort(),
+      asrMonitoring: asrOn,
+      asrPort: this._asrPort(),
       tailscaleMonitoring: tailscaleOn,
       hermes: this._hermes,
       health: this._health,
@@ -699,6 +779,7 @@ export class SparkMonitor {
         llm: this._metrics.llm,
         residentModels: this._metrics.residentModels,
         comfy: comfyOn ? this._metrics.comfy : null,
+        asr: asrOn ? this._metrics.asr : null,
         tailscale: tailscaleOn ? this._metrics.tailscale : null,
       },
     };
@@ -957,6 +1038,7 @@ export class SparkMonitor {
       this._pollDomain("memory"),
       this._pollDomain("llm"),
       this._pollDomain("comfy"),
+      this._pollDomain("asr"),
       this._pollDomain("hermes"),
       this._pollDomain("tailscale"),
       this._pollDomain("residentModels"),
@@ -970,9 +1052,9 @@ export class SparkMonitor {
     // produced ~60k failed SSH logins a day: every domain interval fired, every
     // attempt failed, nothing backed off. Local units are exempt (their checks
     // read /proc and /sys and are cheap and honest about partial failures).
-    // HTTP-only probes (LLM, ComfyUI) do not use SSH, so a failed SSH liveness
+    // HTTP-only probes (LLM, ComfyUI, STT) do not use SSH, so a failed SSH liveness
     // check must not freeze them: the engine may be reachable on its own.
-    const sshBacked = domain !== "llm" && domain !== "comfy";
+    const sshBacked = domain !== "llm" && domain !== "comfy" && domain !== "asr";
     if (sshBacked && !this.spark.isLocal && !this.online) {
       if (!this._pollsPaused) {
         this._pollsPaused = true;
@@ -994,6 +1076,7 @@ export class SparkMonitor {
     // monitoring is on (never workers) and that are remote Linux hosts.
     if (domain === "residentModels" && !this._residentModelsEnabled()) return;
     if (domain === "comfy" && !this._comfyMonitoringEnabled()) return;
+    if (domain === "asr" && !this._asrMonitoringEnabled()) return;
     if (domain === "hermes" && !this._hermesMonitoringEnabled()) return;
     if (domain === "tailscale" && !this._tailscaleMonitoringEnabled()) return;
     const runGeneration = this._runGeneration;
@@ -1008,6 +1091,17 @@ export class SparkMonitor {
           break;
         case "gpu":
           result = await this.collector.collectGpu();
+          if (this.spark.isLocal && result?.processes?.length) {
+            try {
+              result.processes = await tagGpuProcesses(
+                result.processes,
+                this._gpuServicePorts(),
+                HOST_PATHS.PROC
+              );
+            } catch {
+              /* untagged is fine */
+            }
+          }
           break;
         case "cpu":
           result = await this.collector.collectCpu();
@@ -1039,6 +1133,9 @@ export class SparkMonitor {
           break;
         case "comfy":
           result = this.comfyProbe ? await this.comfyProbe.probe() : null;
+          break;
+        case "asr":
+          result = this.asrProbe ? await this.asrProbe.probe() : null;
           break;
         case "tailscale":
           result = this.tailscaleProbe ? await this.tailscaleProbe.probe() : null;
@@ -1108,6 +1205,9 @@ export class SparkMonitor {
           break;
         case "comfy":
           this._metrics.comfy = result;
+          break;
+        case "asr":
+          this._metrics.asr = result;
           break;
         case "tailscale":
           this._metrics.tailscale = result;

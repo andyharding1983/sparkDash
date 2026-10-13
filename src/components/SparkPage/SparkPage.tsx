@@ -13,6 +13,7 @@ import { NetworkPanel } from "./NetworkPanel";
 import { TailscalePanel } from "./TailscalePanel";
 import { LlmPanel } from "./LlmPanel";
 import { ComfyPanel } from "./ComfyPanel";
+import { AsrPanel } from "./AsrPanel";
 import { LlmModelsPanel } from "./LlmModelsPanel";
 import { RocePanel } from "./RocePanel";
 import { UnifiedMemoryPanel } from "./UnifiedMemoryPanel";
@@ -129,8 +130,9 @@ export function SparkPage({
 
   const llmOn = isLlmMonitoringEnabled(spark);
   const comfyOn = Boolean(spark.comfyMonitoring);
+  const asrOn = Boolean(spark.asrMonitoring);
   const tailscaleOn = Boolean(spark.tailscaleMonitoring);
-  const showServices = llmOn || comfyOn;
+  const showServices = llmOn || comfyOn || asrOn;
   // Everything on one page: hardware and services together (no sub-tabs).
   const view: SparkView = showServices ? "all" : "resources";
   const showSvc = showServices && view !== "resources";
@@ -292,6 +294,11 @@ export function SparkPage({
               <Item order={3}>{renderLlmPanel(primaryPort, 0)}</Item>
             )}
             {view === "all" && showSvc && comfyPanel && <Item order={4}>{comfyPanel}</Item>}
+            {view === "all" && showSvc && asrOn && (
+              <Item order={5}>
+                <AsrPanel asr={metrics.asr ?? null} asrPort={spark.asrPort ?? 9000} sparkId={spark.id} />
+              </Item>
+            )}
             {view === "all" &&
               showSvc &&
               llmOn &&

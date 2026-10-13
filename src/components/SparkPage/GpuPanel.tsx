@@ -16,6 +16,10 @@ import {
   type VramBreakdownContext,
 } from "../../shared/vramBreakdown";
 
+/** GPU process service tags (server attribution) → label and bar swatch. */
+const SERVICE_TAG: Record<string, string> = { llm: "LLM", asr: "STT", comfy: "Comfy" };
+const SERVICE_SEG: Record<string, string> = { llm: "engine", asr: "asr", comfy: "comfy" };
+
 interface GpuPanelProps {
   gpu: GpuMetrics | null;
   /**
@@ -363,6 +367,20 @@ export function GpuProcessTable({
             <td className="mono">{proc.pid}</td>
             <td title={`${proc.name} (PID ${proc.pid})`}>
               <span className="sp-table__name">{proc.name}</span>
+              {proc.service ? (
+                <span
+                  className="ml-1.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted"
+                  title={`Serves ${SERVICE_TAG[proc.service] ?? proc.service} on port ${proc.port}`}
+                  data-service={proc.service}
+                >
+                  <span
+                    aria-hidden
+                    className={`inline-block h-1.5 w-1.5 rounded-sm mem-seg-${SERVICE_SEG[proc.service] ?? "other"}`}
+                  />
+                  {SERVICE_TAG[proc.service] ?? proc.service}
+                  {proc.port != null ? <span className="mono normal-case">:{proc.port}</span> : null}
+                </span>
+              ) : null}
             </td>
             <td className="r mono">{formatMb(proc.vramMB)}</td>
           </tr>

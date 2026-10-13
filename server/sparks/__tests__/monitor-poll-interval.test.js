@@ -238,6 +238,7 @@ test("resolveFastPollIntervals: setting, env pin per domain, bandwidth floor", (
     memory: 10_000,
     llm: 10_000,
     comfy: 10_000,
+    asr: 10_000,
   });
   assert.equal(BANDWIDTH_MIN_INTERVAL_MS, 2000);
   assert.equal(resolveFastPollIntervals(1000, {}).memory, 2000, "dmon floor");

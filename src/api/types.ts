@@ -82,6 +82,13 @@ export interface SparkConfig {
   /** ComfyUI HTTP port (default 8188). */
   comfyPort?: number;
   /**
+   * Probe a speech-to-text server (Whisper on vLLM) and show the
+   * Speech-to-text card (default false; all roles).
+   */
+  asrMonitoring?: boolean;
+  /** Speech-to-text HTTP port (default 9000). */
+  asrPort?: number;
+  /**
    * Opt-in: Hermes Agent CLI (nousresearch/hermes-agent) is installed on this
    * machine. When enabled, sparkDash checks for Hermes updates and can run
    * `hermes update` for you via SSH.
@@ -239,7 +246,7 @@ export interface GpuMetrics {
     available: number;
   };
   /** Top GPU processes by VRAM usage (sorted descending, max 5). */
-  processes?: Array<{ pid: number; name: string; vramMB: number }>;
+  processes?: Array<{ pid: number; name: string; vramMB: number; service?: string; port?: number }>;
   /** NVIDIA clock throttle / thermal slowdown state from nvidia-smi. */
   throttle?: GpuThrottle | null;
   /** Kernel NVRM NV_ERR_NO_MEMORY count since boot (cached ~60s). */
@@ -270,7 +277,7 @@ export interface GpuDevice {
   vram: { used: number; total: number; percentage: number; available: number };
   throttle?: GpuThrottle | null;
   /** Processes holding memory on this card only. */
-  processes?: Array<{ pid: number; name: string; vramMB: number }>;
+  processes?: Array<{ pid: number; name: string; vramMB: number; service?: string; port?: number }>;
 }
 
 // ─── CPU metrics ─────────────────────────────────────────
@@ -568,6 +575,47 @@ export interface ComfyMetrics {
   error: string | null;
 }
 
+// ─── Speech-to-text metrics ──────────────────────────────
+/** End-to-end request latency summary, seconds. */
+export interface AsrLatency {
+  count: number;
+  avg: number | null;
+  p50: number | null;
+  p95: number | null;
+}
+
+export interface AsrMetrics {
+  available: boolean;
+  error: string | null;
+  port: number;
+  /** "vLLM" when detected from /metrics or /v1/models owned_by. */
+  engine: string | null;
+  /** Served model ids from /v1/models. */
+  models: string[];
+  /** Basename of the served weights dir (e.g. a merged LoRA). */
+  modelRoot: string | null;
+  maxModelLen: number | null;
+  running: number;
+  waiting: number;
+  /** Cumulative /v1/audio/* 2xx responses since server start. */
+  requestsOk: number | null;
+  /** Cumulative /v1/audio/* non-2xx responses since server start. */
+  requestsError: number | null;
+  /** Cumulative uploaded audio request bytes since server start. */
+  audioBytesTotal: number | null;
+  /** Requests per minute over the last ~60 s; null until enough samples. */
+  requestsPerMin: number | null;
+  /** Latency over the last ~5 min (windowSec says how much was seen). */
+  recentLatency: AsrLatency & { windowSec: number };
+  recentAudioBytes: number;
+  /** Lifetime latency since server start. */
+  latency: AsrLatency;
+  /** Server process start (epoch ms). */
+  startedAt: number | null;
+  /** When sparkDash last saw the request count rise (epoch ms). */
+  lastRequestAt: number | null;
+}
+
 export interface TailscaleMetrics {
   /** True when `tailscale status --json` was read and had a Self entry. */
   available: boolean;
@@ -608,6 +656,8 @@ export interface SparkMetrics {
   residentModels?: Array<{ modelId: string; container: string }>;
   /** ComfyUI probe result when monitoring is enabled; null when off or not yet polled. */
   comfy?: ComfyMetrics | null;
+  /** Speech-to-text probe result when monitoring is enabled; null when off or not yet polled. */
+  asr?: AsrMetrics | null;
   /** Tailnet probe result when monitoring is enabled; null when off or not yet polled. */
   tailscale?: TailscaleMetrics | null;
 }
@@ -659,6 +709,10 @@ export interface SparkSnapshot {
   comfyMonitoring?: boolean;
   /** ComfyUI HTTP port (default 8188) */
   comfyPort?: number;
+  /** Whether speech-to-text is probed (opt-in; all roles) */
+  asrMonitoring?: boolean;
+  /** Speech-to-text HTTP port (default 9000) */
+  asrPort?: number;
   /** Whether tailnet presence is probed (opt-in; all roles) */
   tailscaleMonitoring?: boolean;
   /** Hermes Agent update monitoring state (present in every snapshot). */

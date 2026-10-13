@@ -655,6 +655,13 @@ export class SparkRegistry {
       /** ComfyUI HTTP port (default 8188). */
       comfyPort: this._normalizeComfyPort(config.comfyPort),
       /**
+       * Probe a local speech-to-text server (Whisper on vLLM) and show the
+       * Speech-to-text card (default false; all roles).
+       */
+      asrMonitoring: Boolean(config.asrMonitoring),
+      /** Speech-to-text HTTP port (default 9000). */
+      asrPort: this._normalizeAsrPort(config.asrPort),
+      /**
        * Opt-in tailnet presence via `tailscale status --json` (default false).
        */
       // Hermes and Tailnet probes are bash scripts; Windows units do not run them.
@@ -675,6 +682,13 @@ export class SparkRegistry {
     const n = typeof value === "string" ? parseInt(value, 10) : Number(value);
     if (Number.isInteger(n) && n >= 1 && n <= 65535) return n;
     return 8188;
+  }
+
+  /** Normalize speech-to-text port to 1–65535 (default 9000). */
+  _normalizeAsrPort(value) {
+    const n = typeof value === "string" ? parseInt(value, 10) : Number(value);
+    if (Number.isInteger(n) && n >= 1 && n <= 65535) return n;
+    return 9000;
   }
 
   /** Normalize role; legacy workerNode=true → worker. */

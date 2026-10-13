@@ -196,6 +196,10 @@ export function ingestSnapshots(sparks: SparkSnapshot[], at = Date.now()): void 
         }
       }
     }
+    if (m.asr?.available) {
+      if (m.asr.requestsPerMin != null) pushHistory(`${s.id}:asr.rpm`, m.asr.requestsPerMin, at);
+      pushHistory(`${s.id}:asr.queue`, (m.asr.running ?? 0) + (m.asr.waiting ?? 0), at);
+    }
     if (m.comfy?.available) {
       pushHistory(`${s.id}:comfy.queue`, (m.comfy.queueRunning ?? 0) + (m.comfy.queuePending ?? 0), at);
     }

@@ -24,6 +24,12 @@ const gb = (n: number) => `${n.toFixed(1)} GB`;
 /** "/usr/bin/python3" → "python3": the card is too narrow for interpreter paths. */
 const processLabel = (name: string) => name.split("/").filter(Boolean).pop() || name;
 
+/** "sglang::scheduler · :8888 · 2 procs" or "python3 · pid 123" when unattributed. */
+const serviceDetail = (e: { name: string; pid: number; port?: number; processCount?: number }) =>
+  e.port != null
+    ? `${processLabel(e.name)} · :${e.port}${(e.processCount ?? 1) > 1 ? ` · ${e.processCount} procs` : ""}`
+    : `${processLabel(e.name)} · pid ${e.pid}`;
+
 function Swatch({ kind }: { kind: VramSegmentKey }) {
   return (
     <span aria-hidden className={`inline-block h-1.5 w-1.5 shrink-0 rounded-sm mem-seg-${kind}`} />
@@ -179,8 +185,8 @@ export function VramBreakdownBar({ label, breakdown: b, showLegend = false }: Vr
           <>
             <TipRow
               swatch="engine"
-              label="Engine"
-              detail={`${processLabel(b.engine.name)} · pid ${b.engine.pid}`}
+              label={b.engine.port != null ? "LLM" : "Engine"}
+              detail={serviceDetail(b.engine)}
               value={formatMb(b.engine.mb)}
             />
             {b.kv?.weightsGb != null && <TipRow indent label="Weights" value={gb(b.kv.weightsGb)} />}
@@ -195,8 +201,17 @@ export function VramBreakdownBar({ label, breakdown: b, showLegend = false }: Vr
             )}
           </>
         )}
+        {b.services.map((svc) => (
+          <TipRow
+            key={svc.key}
+            swatch={svc.key}
+            label={svc.key === "asr" ? "Speech-to-text" : "ComfyUI"}
+            detail={serviceDetail(svc)}
+            value={formatMb(svc.mb)}
+          />
+        ))}
         {b.systemMB != null && <TipRow swatch="system" label="System / CPU" value={formatMb(b.systemMB)} />}
-        {b.engine ? (
+        {b.engine || b.services.length > 0 ? (
           b.otherMB > 0 && <TipRow swatch="other" label="Other GPU" value={formatMb(b.otherMB)} />
         ) : (
           <TipRow swatch="gpu" label="GPU" value={formatMb(b.otherMB)} />

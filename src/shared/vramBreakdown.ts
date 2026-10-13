@@ -126,7 +126,7 @@ export function servingEndpoint(
 
 // ─── Breakdown ───────────────────────────────────────────
 
-export type VramSegmentKey = "engine" | "system" | "other" | "gpu";
+export type VramSegmentKey = "engine" | "asr" | "comfy" | "system" | "other" | "gpu";
 
 export interface VramSegment {
   key: VramSegmentKey;
@@ -137,6 +137,10 @@ export interface GpuProcessLike {
   pid: number;
   name: string;
   vramMB: number;
+  /** Probed service this process serves (local units; server-side attribution). */
+  service?: string;
+  /** That service's listen port. */
+  port?: number;
 }
 
 export interface UnifiedMemoryLike {
@@ -181,6 +185,10 @@ export interface VramEngineInfo {
   name: string;
   pid: number;
   mb: number;
+  /** Listen port when the process was attributed to a service (not guessed). */
+  port?: number;
+  /** Processes summed into `mb` (an engine can be a server + scheduler). */
+  processCount?: number;
 }
 
 export interface VramKvInfo {
@@ -202,6 +210,8 @@ export interface VramBreakdown {
   freeMB: number;
   tone: HeadroomTone;
   engine: VramEngineInfo | null;
+  /** Other attributed services (speech-to-text, ComfyUI), bar order. */
+  services: Array<VramEngineInfo & { key: "asr" | "comfy" }>;
   /** CPU-side use of a unified pool; null on a discrete card. */
   systemMB: number | null;
   /** GPU use outside the engine — or all GPU use when no engine is identified. */
@@ -227,6 +237,23 @@ function largestProcess(processes: readonly GpuProcessLike[] | null | undefined)
   return best;
 }
 
+/** Sum the processes tagged with `service` into one entry (largest names it). */
+function serviceTotal(
+  processes: readonly GpuProcessLike[],
+  service: string,
+): VramEngineInfo | null {
+  const mine = processes.filter((p) => p?.service === service && (finite(p.vramMB) ?? 0) > 0);
+  if (mine.length === 0) return null;
+  const top = largestProcess(mine)!;
+  return {
+    name: top.name,
+    pid: top.pid,
+    mb: mine.reduce((sum, p) => sum + p.vramMB, 0),
+    port: top.port,
+    processCount: mine.length,
+  };
+}
+
 /**
  * Split a GPU's memory into engine / system / other / free.
  *
@@ -235,8 +262,11 @@ function largestProcess(processes: readonly GpuProcessLike[] | null | undefined)
  *   (MemAvailable). Without `unifiedMemory` it falls back to `vram`.
  * - Discrete: the bar is the card's VRAM; headroom is total − used (the host
  *   collector fills `available` with system RAM while no GPU process runs).
- * - Serving with a process list: the largest GPU process is the engine.
- *   Otherwise all GPU use is one "gpu" segment.
+ * - Processes the server attributed to a service (`service` tag, local units):
+ *   LLM processes sum into the engine, speech-to-text and ComfyUI get their
+ *   own segments, and only the rest is "other".
+ * - Otherwise, serving with a process list: the largest GPU process is the
+ *   engine. Otherwise all GPU use is one "gpu" segment.
  *
  * Returns null when there is no total to draw against.
  */
@@ -269,19 +299,53 @@ export function computeVramBreakdown(
         : Math.max(0, totalMB - gpuUsedMB);
   }
 
-  const largest = ctx.serving && gpuUsedMB > 0 ? largestProcess(processes) : null;
-  const engine: VramEngineInfo | null = largest
-    ? { name: largest.name, pid: largest.pid, mb: Math.min(largest.vramMB, gpuUsedMB) }
-    : null;
+  const procs = Array.isArray(processes) ? processes : [];
+  const tagged = gpuUsedMB > 0 && procs.some((p) => p?.service);
+  let engine: VramEngineInfo | null = null;
+  const services: VramBreakdown["services"] = [];
+  if (tagged) {
+    // Cap each in turn so the attributed parts never exceed what the GPU reports.
+    let left = gpuUsedMB;
+    const llm = serviceTotal(procs, "llm");
+    if (llm) {
+      engine = { ...llm, mb: Math.min(llm.mb, left) };
+      left -= engine.mb;
+    }
+    for (const key of ["asr", "comfy"] as const) {
+      const svc = serviceTotal(procs, key);
+      if (svc && left > 0) {
+        services.push({ ...svc, key, mb: Math.min(svc.mb, left) });
+        left -= Math.min(svc.mb, left);
+      }
+    }
+    // An untagged process that is still the largest one while an LLM endpoint
+    // is serving (e.g. a remote-style setup the walk could not follow) keeps
+    // the old heuristic rather than vanishing into "other".
+    if (!engine && ctx.serving) {
+      const untagged = largestProcess(procs.filter((p) => !p?.service));
+      if (untagged) engine = { name: untagged.name, pid: untagged.pid, mb: Math.min(untagged.vramMB, left) };
+    }
+  } else {
+    const largest = ctx.serving && gpuUsedMB > 0 ? largestProcess(processes) : null;
+    engine = largest
+      ? { name: largest.name, pid: largest.pid, mb: Math.min(largest.vramMB, gpuUsedMB) }
+      : null;
+  }
   // Serving, but no process list to name the engine (a worker's shard, a container): the
   // GPU memory is still the model's, so colour it as such instead of as anonymous "GPU".
-  const wholeGpuIsModel = ctx.serving && gpuUsedMB > 0 && !engine && !hasProcesses(processes);
-  const otherMB = Math.max(0, gpuUsedMB - (engine?.mb ?? 0));
+  const wholeGpuIsModel =
+    ctx.serving && gpuUsedMB > 0 && !engine && services.length === 0 && !hasProcesses(processes);
+  const attributedMB = (engine?.mb ?? 0) + services.reduce((sum, s) => sum + s.mb, 0);
+  const otherMB = Math.max(0, gpuUsedMB - attributedMB);
 
   const segments: VramSegment[] = [];
   if (engine) segments.push({ key: "engine", mb: engine.mb });
+  for (const svc of services) segments.push({ key: svc.key, mb: svc.mb });
   if (systemMB != null) segments.push({ key: "system", mb: systemMB });
-  segments.push({ key: engine ? "other" : wholeGpuIsModel ? "engine" : "gpu", mb: otherMB });
+  segments.push({
+    key: engine || services.length > 0 ? "other" : wholeGpuIsModel ? "engine" : "gpu",
+    mb: otherMB,
+  });
 
   const ep = engine ? ctx.endpoint ?? null : null;
   const kv: VramKvInfo | null = ep
@@ -301,6 +365,7 @@ export function computeVramBreakdown(
     freeMB,
     tone: headroomTone(freeMB, ctx.model),
     engine,
+    services,
     systemMB,
     otherMB,
     kv,
@@ -309,6 +374,8 @@ export function computeVramBreakdown(
 
 export const SEGMENT_LABELS: Readonly<Record<VramSegmentKey, string>> = Object.freeze({
   engine: "Model",
+  asr: "STT",
+  comfy: "Comfy",
   system: "System",
   other: "Other",
   gpu: "GPU",
@@ -323,7 +390,12 @@ export function gbNumber(mb: number): string {
 export function legendItems(b: VramBreakdown): Array<{ key: VramSegmentKey | "free"; label: string; gb: string }> {
   const items: Array<{ key: VramSegmentKey | "free"; label: string; gb: string }> = b.segments
     .filter((s) => gbNumber(s.mb) !== "0.0")
-    .map((s) => ({ key: s.key, label: SEGMENT_LABELS[s.key], gb: gbNumber(s.mb) }));
+    .map((s) => ({
+      key: s.key,
+      // An attributed engine is known to be the LLM server, not just the largest process.
+      label: s.key === "engine" && b.engine?.port != null ? "LLM" : SEGMENT_LABELS[s.key],
+      gb: gbNumber(s.mb),
+    }));
   items.push({ key: "free", label: "Free", gb: gbNumber(b.freeMB) });
   return items;
 }

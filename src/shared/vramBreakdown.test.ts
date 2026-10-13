@@ -143,6 +143,42 @@ describe("isLlmServing / servingEndpoint", () => {
 });
 
 describe("computeVramBreakdown", () => {
+  it("uses server service tags: LLM sums its processes, STT gets its own segment", () => {
+    // dgx-spark-1 as observed live: SGLang (scheduler + launcher) on :8888, Whisper on vLLM :9000.
+    const procs = [
+      { pid: 62_692, name: "sglang::scheduler", vramMB: 71_955, service: "llm", port: 8888 },
+      { pid: 2_960_007, name: "VLLM::EngineCore", vramMB: 8_797, service: "asr", port: 9000 },
+      { pid: 62_350, name: "python3", vramMB: 1_418, service: "llm", port: 8888 },
+    ];
+    const um = { total: 124_608, gpuUsed: 82_670, cpuUsed: 13_990, available: 28_448 };
+    const b = computeVramBreakdown({ used: 82_670, total: 124_608, available: 28_448 }, procs, {
+      model: "unified",
+      unified: um,
+      serving: true,
+    })!;
+    expect(b.segments).toEqual([
+      { key: "engine", mb: 73_373 },
+      { key: "asr", mb: 8_797 },
+      { key: "system", mb: 13_990 },
+      { key: "other", mb: 500 },
+    ]);
+    expect(b.engine).toEqual({
+      name: "sglang::scheduler",
+      pid: 62_692,
+      mb: 73_373,
+      port: 8888,
+      processCount: 2,
+    });
+    expect(b.services.map((s) => `${s.key} ${s.port} ${s.mb}`)).toEqual(["asr 9000 8797"]);
+    expect(legendItems(b).map((i) => `${i.label} ${i.gb}`)).toEqual([
+      "LLM 71.7",
+      "STT 8.6",
+      "System 13.7",
+      "Other 0.5",
+      "Free 27.8",
+    ]);
+  });
+
   it("splits spark-1's unified pool into engine, system and free", () => {
     const b = computeVramBreakdown(SPARK1_VRAM, SPARK1_PROCS, {
       model: "unified",
