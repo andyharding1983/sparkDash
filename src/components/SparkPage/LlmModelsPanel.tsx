@@ -308,7 +308,12 @@ function LlmModelsPanelFor({ spark, className }: { spark: SparkSnapshot; classNa
             {l.dir}
           </div>
           {l.notes ? <div className="sp-launch__notes">{l.notes}</div> : null}
-          {serving && servedModel ? <div className="sp-launch__notes mono">{servedModel}</div> : null}
+          {serving && servedModel ? (
+            // One line like the directory above, so long model ids (Whisper fine-tunes) keep rows even.
+            <div className="sp-launch__dir mono" title={servedModel}>
+              {servedModel}
+            </div>
+          ) : null}
         </div>
         <div className="sp-launch__actions">
           {pending?.kind === "stop" ? (
